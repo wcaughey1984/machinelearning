@@ -1,0 +1,142 @@
+---
+title: "Exercise Prediction Project"
+author: "Billy Caughey"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+# Introduction
+
+Tree-based methods can be powerful tools in prediction. In the current project, Tree-based methods will be used to predict exercise movements of 6 study participants. Information about these exercises where collected by accelerometers were worn by study participants around the belt, forearm, and arm. As part of the study, participants were asked to perform an exercise correctly and incorrectly. 
+
+This project will have three main components: 1) training a model, 2) testing the model, and 3) making predictions with the model.
+
+# Training the Model
+
+## Observing the Training Data
+
+Training and testing data were supplied for this project. The training data contains observations where the exercise movement is identified. Alternatively, the 'testing', or what will be referenced as the predicting data, has 20 observations with no classification of exercise.
+
+This, initially, causes some concern. If the training data is not sufficiently large to train and test a model, then additional measures will be taken to correct this before any predictions can occur. Now, consider the dimensions of the training set.
+
+```{r traininglook}
+
+trainData <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+dim(trainData)
+
+```
+
+With 19,622 observations, there is more than enough information to split this set into a training (labeled as t.data) and testing set (labeled as v.data). Using a 70/30 split, this is done below. It should be noted this new testing set will be where the testing error, or out of sample, will be computed. For the entirety of this project, the seed of 1234 will be used.
+
+```{r trainvalidate}
+
+## Set up training and validation sets
+library(caret)
+set.seed(1234)
+inTrain <- createDataPartition(trainData$classe, p = 0.7, list = FALSE)
+t.data <- trainData[inTrain,]
+v.data <- trainData[-inTrain,]
+
+```
+
+## Data Cleaning
+
+Before the model can be trained, the data used to train the model will be cleaned and features engineered, if needed. It should be noted and emphasized any cleaning which occurs in the training data will occur in both the test and prediction sets. 
+
+A first question is are there fields in the training data which contain a large missing data? To answer this question, a missingness map is used from the Amelia library. This map will display where missing data exists.
+
+```{r missingness, fig.width=14}
+
+library(Amelia)
+missmap(t.data, col = c("yellow","black"), title = "Missingness Map", y.at=c(1),y.labels=c(''),legend = FALSE,x.cex = 0.5)
+
+```
+
+In the missingness map, the yellow represents all the missing data observed in the training set. As this missingmess plot suggests, there is a multitude of fields which are empty. These fields are removed from the analysis.
+
+```{r removingemptyfields}
+
+t.data <- t.data[lapply(t.data, function(x) sum(is.na(x))/length(x)) < 0.1,]
+
+```
+
+A second question is are there are any significantly sparse fields in the training set? The answer to this question is yes. There are several fields which contain less than sufficient information to impute missing values. Therefore, these fields will be dropped. 
+
+```{r removingsparesefields}
+
+dropFields <- grep("timestamp|X|user_name|window|skewness|kurtosis|min|max|amplitude", 
+                   names(t.data))
+t.data <- t.data[,-dropFields]
+
+```
+
+A third question would be is there a need for additional features or to engineer new features? Any adjustments to the data by scale or transform would not affect the model given it is a tree based model. Therefore, there is not significant need for feature engineering.  If the model were a different classification model, nearest neighbors for instance, fields would be standardized.
+
+## Training
+
+With the cleaning complete, a model now can be trained. A 5-fold cross validation will be applied to a random forest. The results of training the model are below.
+
+```{r trainingmodel}
+
+library(caret)
+set.seed(1234)
+train_control <- trainControl(method="cv",number=5)
+mod1 <- train(classe ~ . , data = t.data, trControl = train_control, method = "rf")
+print(mod1)
+
+```
+
+```{r plotting model}
+plot(mod1)
+```
+
+The training error associated with this model is 0.9% (1 - accuracy). This is a great error rate, but must be observed with some caution. Typically, the training error is an overestimataion of the testing error rate. 
+
+A visual representation of the model was desired at this point. Unfortunately, random forests using the 'train' function do not lend themselves to such visual representations. If the randomForest() function from the randomForest library were used, a visualization could be produced.
+
+# Testing the Model
+
+Using the testing set previously established, the model will be tested. From this test, the testing error will be established. This testing error will be used to determine the appropriateness of the model.
+
+```{r validatingmodel}
+
+v.data <- v.data[lapply(v.data, function(x) sum(is.na(x))/length(x)) < 0.1,]
+dropFields <- grep("timestamp|X|user_name|window|skewness|kurtosis|min|max|amplitude", 
+                   names(v.data))
+v.data <- v.data[,-dropFields]
+
+valid.model <- predict(mod1,v.data)
+ 
+table(valid.model,v.data$classe)
+mean.class.error <- mean((valid.model != v.data$classe)); print(mean.class.error)
+accuracy <- 1 - mean((valid.model != v.data$classe)); print(accuracy)
+
+```
+
+The resulting testing error is 0.5%. This is a phenomenal testing error. There is one point of concern. The testing error is less than the training error. Typically, the training error is less than testing error due to training error being an overestimation of the testing error. With that said, it is not impossible for the testing error to be less than the training error. In this case, since the training and testing error are essentially the same. If the testing error was significantly higher than the training error there would be cause for concern.
+
+# Prediction
+
+The conclusion of this project is to predict which exercise twenty subjects were performing. The testing data will be cleaned in the same fashion as the training and validation data were.
+
+```{r testingdata}
+
+p.data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+## Need to clean the test data the same way training and validation were cleaned
+p.data <- p.data[,lapply(p.data, function(x) sum(is.na(x))/length(x)) < 0.1]
+dropFields <- grep("timestamp|X|user_name|window|skewness|kurtosis|min|max|amplitude", 
+                   names(p.data))
+p.data <- p.data[,-dropFields]
+
+predicted.exercises <- predict(mod1,p.data)
+predicted.exercises
+
+```
+
+
